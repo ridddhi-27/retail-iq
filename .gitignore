@@ -34,6 +34,6 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Large ML binary models
+# Large ML binary models and large test datasets
 *.joblib
-*.csv
+retailiq_sample_large.csv
