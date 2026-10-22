@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized (%s)", "SQLite" if settings.is_sqlite else "PostgreSQL")
 
-    # Discover and load ML model artifacts
+    # Discover and initialize ML model artifacts in memory-efficient mode
     artifacts_dir = model_service.discover_artifacts_dir(
         explicit_path=settings.model_path or settings.model_dir
     )
@@ -42,13 +42,13 @@ async def lifespan(app: FastAPI):
     if artifacts_dir:
         logger.info("Discovered ML model artifacts at: %s", artifacts_dir)
         model_service.artifacts_dir = artifacts_dir
-        model_service.load_all()
+        model_service.initialize()
     else:
         logger.error(
             "CRITICAL: retailiq_model.joblib not found in any candidate locations (model_dir=%s, cwd=%s)",
             settings.model_dir, Path.cwd()
         )
-        model_service.load_error = f"Model artifact retailiq_model.joblib not found in searched locations."
+        model_service.load_error = "Model artifact retailiq_model.joblib not found in searched locations."
 
     status = model_service.get_status()
     logger.info("Model status: %s", status)

@@ -111,8 +111,19 @@ class ModelService:
 
         return None
 
-    def load_all(self) -> None:
-        """Load all available model artifacts safely."""
+    @property
+    def model_available_on_disk(self) -> bool:
+        if self.artifacts_dir:
+            return (self.artifacts_dir / "retailiq_model.joblib").exists()
+        discovered = self.discover_artifacts_dir()
+        return discovered is not None and (discovered / "retailiq_model.joblib").exists()
+
+    def initialize(self) -> None:
+        """
+        Lightweight initialization on server startup.
+        Discovers artifacts and loads lightweight metadata without unpickling the model binary.
+        Prevents Out-Of-Memory (OOM) crashes on 512MB RAM cloud tiers like Render.
+        """
         if not self.artifacts_dir or not (self.artifacts_dir / "retailiq_model.joblib").exists():
             discovered = self.discover_artifacts_dir()
             if discovered:
@@ -124,9 +135,76 @@ class ModelService:
         self._load_feature_columns()
         self._load_metrics()
         self._load_model_comparison()
+
+        model_file = self.artifacts_dir / "retailiq_model.joblib"
+        if model_file.exists():
+            self.load_error = None
+            logger.info("ML model verified on disk at %s (ready for on-demand live inference)", model_file)
+        else:
+            self.load_error = f"Model artifact retailiq_model.joblib not found at {model_file}"
+            logger.warning(self.load_error)
+
+        import gc
+        gc.collect()
+
+    def load_all(self) -> None:
+        """Full synchronous load (useful for local dev/testing)."""
+        self.initialize()
         self._load_forecasts()
         self._load_inventory()
-        self._load_model()
+        self._ensure_model_loaded()
+
+    def _ensure_model_loaded(self) -> bool:
+        """
+        Safely loads the Extra Trees model into memory on demand.
+        Includes MemoryError handling and explicit garbage collection.
+        """
+        if self.model_loaded and self.model is not None:
+            return True
+
+        if not self.artifacts_dir:
+            self.artifacts_dir = self.discover_artifacts_dir()
+            if not self.artifacts_dir:
+                self.load_error = "Model artifacts directory could not be resolved"
+                logger.error(self.load_error)
+                return False
+
+        path = self.artifacts_dir / "retailiq_model.joblib"
+        if not path.exists():
+            self.model_loaded = False
+            self.load_error = f"Model artifact retailiq_model.joblib not found at {path}"
+            logger.error(self.load_error)
+            return False
+
+        import gc
+        gc.collect()  # Release memory before unpickling
+
+        try:
+            import joblib
+            logger.info("Loading Extra Trees ML model from %s ...", path)
+            self.model = joblib.load(path)
+            self.model_loaded = True
+            self.load_error = None
+            gc.collect()  # Release temporary unpickling buffers
+            logger.info("Loaded retailiq_model.joblib successfully (%s)", type(self.model).__name__)
+            return True
+        except MemoryError as mem_err:
+            self.model = None
+            self.model_loaded = False
+            self.load_error = (
+                "Out of memory loading Extra Trees model. The server has reached its RAM limit (512 MB). "
+                "Additional memory is required to execute live inference."
+            )
+            logger.critical(self.load_error)
+            gc.collect()
+            return False
+        except Exception as e:
+            self.model = None
+            self.model_loaded = False
+            self.load_error = f"Failed to load model from {path}: {e}"
+            logger.error(self.load_error, exc_info=True)
+            gc.collect()
+            return False
 
     def _load_feature_columns(self) -> None:
         path = self.artifacts_dir / "feature_columns.json"
@@ -175,27 +253,12 @@ class ModelService:
                 logger.warning("Error reading inventory_recommendations.csv: %s", e)
 
     def _load_model(self) -> None:
-        path = self.artifacts_dir / "retailiq_model.joblib"
-        if not path.exists():
-            self.model_loaded = False
-            self.load_error = f"Model artifact retailiq_model.joblib not found at {path}"
-            logger.error(self.load_error)
-            return
-
-        try:
-            import joblib
-            self.model = joblib.load(path)
-            self.model_loaded = True
-            self.load_error = None
-            logger.info("Loaded retailiq_model.joblib successfully from %s (%s)", path, type(self.model).__name__)
-        except Exception as e:
-            self.model_loaded = False
-            self.load_error = f"Failed to load model from {path}: {e}"
-            logger.error(self.load_error, exc_info=True)
+        self._ensure_model_loaded()
 
     def get_status(self) -> Dict[str, Any]:
         return {
             "model_loaded": self.model_loaded,
+            "model_available_on_disk": self.model_available_on_disk,
             "model_type": type(self.model).__name__ if self.model else None,
             "artifacts_dir": str(self.artifacts_dir) if self.artifacts_dir else None,
             "forecast_loaded": self.forecast_loaded,
@@ -226,77 +289,93 @@ class ModelService:
         ws = db.query(Workspace).filter(Workspace.workspace_id == workspace_id).first()
         is_sample = ws.is_sample if ws else False
 
+        # Attempt to load model on demand if available on disk
+        if not self.model_loaded and self.model_available_on_disk:
+            self._ensure_model_loaded()
+
         # If live model is NOT loaded and pre-computed forecast is available for sample workspace
-        if not self.model_loaded and is_sample and self.forecast_df is not None:
-            logger.warning(
-                "Live model is unavailable (%s). Using static precomputed forecasts for sample workspace.",
-                self.load_error or "not loaded"
-            )
-            df = self.forecast_df.copy()
-            df = df[df["product_id"].isin(product_ids)]
-            if horizon_days < 30:
-                df = df.groupby("product_id").head(horizon_days)
-
-            # Store run in db scoped to workspace
-            run = ForecastRun(
-                workspace_id=workspace_id,
-                model_name="Precomputed Baseline (Model Unavailable)",
-                horizon_days=horizon_days,
-                products_count=len(product_ids),
-                status="completed",
-            )
-            db.add(run)
-            db.flush()
-
-            forecast_results = []
-            for _, row in df.iterrows():
-                f_date = row["date"].date() if hasattr(row["date"], "date") else row["date"]
-                units_pred = round(float(row["predicted_units_sold"]), 1)
-                u_price = float(row.get("assumed_unit_price", 0)) if row.get("assumed_unit_price") else None
-                disc = float(row.get("assumed_discount_pct", 0)) if row.get("assumed_discount_pct") is not None else 0.0
-                promo = int(row.get("assumed_promotion_flag", 0)) if row.get("assumed_promotion_flag") is not None else 0
-
-                res = ForecastResult(
-                    workspace_id=workspace_id,
-                    run_id=run.id,
-                    product_id=row["product_id"],
-                    forecast_date=f_date,
-                    predicted_units_sold=units_pred,
-                    assumed_unit_price=u_price,
-                    assumed_discount_pct=disc,
-                    assumed_promotion_flag=promo,
+        if not self.model_loaded and is_sample:
+            forecast_file = (self.artifacts_dir / "forecast_30_days.csv") if self.artifacts_dir else None
+            if forecast_file and forecast_file.exists():
+                logger.warning(
+                    "Live model is unavailable (%s). Using static precomputed forecasts for sample workspace.",
+                    self.load_error or "not loaded"
                 )
-                db.add(res)
-                forecast_results.append({
-                    "product_id": row["product_id"],
-                    "product_name": row.get("product_name"),
-                    "category": row.get("category"),
-                    "forecast_date": str(f_date),
-                    "predicted_units_sold": units_pred,
-                    "assumed_unit_price": u_price,
-                    "assumed_discount_pct": disc,
-                    "assumed_promotion_flag": promo,
-                })
-            db.commit()
+                import gc
+                df = pd.read_csv(forecast_file, parse_dates=["date"])
+                df = df[df["product_id"].isin(product_ids)]
+                if horizon_days < 30:
+                    df = df.groupby("product_id").head(horizon_days)
 
-            total_units = sum(f["predicted_units_sold"] for f in forecast_results)
-            avg_daily = total_units / max(1, horizon_days)
-            day_totals = {}
-            for f in forecast_results:
-                day_totals[f["forecast_date"]] = day_totals.get(f["forecast_date"], 0) + f["predicted_units_sold"]
-            peak_day = max(day_totals.items(), key=lambda x: x[1])[0] if day_totals else None
+                # Store run in db scoped to workspace
+                run = ForecastRun(
+                    workspace_id=workspace_id,
+                    model_name="Precomputed Baseline (Model Unavailable)",
+                    horizon_days=horizon_days,
+                    products_count=len(product_ids),
+                    status="completed",
+                )
+                db.add(run)
+                db.flush()
 
-            return {
-                "run_id": run.id,
-                "model_name": run.model_name,
-                "horizon_days": horizon_days,
-                "products_count": len(product_ids),
-                "total_predicted_units": round(total_units, 1),
-                "avg_daily_forecast": round(avg_daily, 1),
-                "highest_demand_day": peak_day,
-                "forecasts": forecast_results,
-                "status": "completed",
-            }
+                forecast_results = []
+                for _, row in df.iterrows():
+                    f_date = row["date"].date() if hasattr(row["date"], "date") else row["date"]
+                    units_pred = round(float(row["predicted_units_sold"]), 1)
+                    u_price = float(row.get("assumed_unit_price", 0)) if row.get("assumed_unit_price") else None
+                    disc = float(row.get("assumed_discount_pct", 0)) if row.get("assumed_discount_pct") is not None else 0.0
+                    promo = int(row.get("assumed_promotion_flag", 0)) if row.get("assumed_promotion_flag") is not None else 0
+
+                    res = ForecastResult(
+                        workspace_id=workspace_id,
+                        run_id=run.id,
+                        product_id=row["product_id"],
+                        forecast_date=f_date,
+                        predicted_units_sold=units_pred,
+                        assumed_unit_price=u_price,
+                        assumed_discount_pct=disc,
+                        assumed_promotion_flag=promo,
+                    )
+                    db.add(res)
+                    forecast_results.append({
+                        "product_id": row["product_id"],
+                        "product_name": row.get("product_name"),
+                        "category": row.get("category"),
+                        "forecast_date": str(f_date),
+                        "predicted_units_sold": units_pred,
+                        "assumed_unit_price": u_price,
+                        "assumed_discount_pct": disc,
+                        "assumed_promotion_flag": promo,
+                    })
+                db.commit()
+                del df
+                gc.collect()
+
+                total_units = sum(f["predicted_units_sold"] for f in forecast_results)
+                avg_daily = total_units / max(1, horizon_days)
+                day_totals = {}
+                for f in forecast_results:
+                    day_totals[f["forecast_date"]] = day_totals.get(f["forecast_date"], 0) + f["predicted_units_sold"]
+                peak_day = max(day_totals.items(), key=lambda x: x[1])[0] if day_totals else None
+
+                return {
+                    "run_id": run.id,
+                    "model_name": run.model_name,
+                    "horizon_days": horizon_days,
+                    "products_count": len(product_ids),
+                    "total_predicted_units": round(total_units, 1),
+                    "avg_daily_forecast": round(avg_daily, 1),
+                    "highest_demand_day": peak_day,
+                    "forecasts": forecast_results,
+                    "status": "completed",
+                }
+
+        # If model failed due to OOM on custom workspace, give an explicit actionable error
+        if not self.model_loaded and self.load_error and "Out of memory" in self.load_error:
+            raise ValueError(
+                "The server reached memory capacity (512 MB) attempting to load the ML model. "
+                "Additional RAM is required on the host instance."
+            )
 
         # Live inference execution path
         products = db.query(Product).filter(
@@ -305,11 +384,20 @@ class ModelService:
         ).all()
         prod_map = {p.product_id: p for p in products}
 
-        # Check historical sales data
-        sales_records = db.query(SalesRecord).filter(
-            SalesRecord.workspace_id == workspace_id,
-            SalesRecord.product_id.in_(product_ids)
-        ).order_by(SalesRecord.date).all()
+        # Check historical sales data - bound query to recent history (max 60 days per product)
+        # to prevent loading tens of thousands of rows into memory
+        max_lookback = 60
+        sales_records = (
+            db.query(SalesRecord)
+            .filter(
+                SalesRecord.workspace_id == workspace_id,
+                SalesRecord.product_id.in_(product_ids)
+            )
+            .order_by(SalesRecord.date.desc())
+            .limit(len(product_ids) * max_lookback)
+            .all()
+        )
+        sales_records = sorted(sales_records, key=lambda r: r.date)
 
         if not sales_records:
             raise ValueError(
@@ -416,6 +504,10 @@ class ModelService:
                     "assumed_discount_pct": 0.0,
                     "assumed_promotion_flag": 0,
                 })
+
+        del df_sales
+        import gc
+        gc.collect()
 
         db.commit()
 

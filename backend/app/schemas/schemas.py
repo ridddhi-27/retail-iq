@@ -32,11 +32,13 @@ class WorkspaceStatusResponse(BaseModel):
 # ── Health ────────────────────────────────────────────────
 class HealthResponse(BaseModel):
     status: str = "ok"
+    app_available: bool = True
     app_name: str = "RetailIQ"
     version: str = "1.0.0"
     database: str = "unknown"
     model: str = "unknown"
     model_loaded: bool = False
+    model_available_on_disk: bool = False
     model_path: Optional[str] = None
     model_error: Optional[str] = None
     environment: str = "development"
