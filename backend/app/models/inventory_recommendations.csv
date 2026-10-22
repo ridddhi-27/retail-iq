@@ -1,0 +1,31 @@
+product_id,product_name,category,current_stock,lead_time_days,forecast_demand_during_lead_time,safety_stock_units,recommended_order_quantity,recommendation
+P016,Instant Noodles,Packaged Food,300.0,4,381.39,56.0,138,REORDER
+P027,Chocolate Bar,Confectionery,122.0,3,158.92,30.0,67,REORDER
+P007,Salt 1 kg,Staples,127.0,5,164.75,22.0,60,REORDER
+P021,Toothpaste 150 g,Personal Care,114.0,6,155.01,16.0,58,REORDER
+P025,Bottled Water 1 L,Beverages,103.0,2,113.76,40.0,51,REORDER
+P008,Tea 250 g,Beverages,178.0,7,205.07,19.0,47,REORDER
+P018,Tomato Ketchup,Condiments,98.0,7,127.98,12.0,42,REORDER
+P010,Milk 500 ml,Dairy,217.0,3,201.3,44.0,29,REORDER
+P006,Sugar 1 kg,Staples,128.0,3,114.75,27.0,14,REORDER
+P020,Shampoo 180 ml,Personal Care,57.0,4,59.24,9.0,12,REORDER
+P017,Pasta 500 g,Packaged Food,128.0,5,120.34,14.0,7,REORDER
+P004,Moong Dal 1 kg,Pulses,124.0,4,111.73,17.0,5,REORDER
+P024,Floor Cleaner 1 L,Household,65.0,4,58.85,9.0,3,REORDER
+P015,Potato Chips,Snacks,466.0,6,341.46,36.0,0,STOCK SUFFICIENT
+P012,Butter 100 g,Dairy,70.0,3,56.17,12.0,0,STOCK SUFFICIENT
+P011,Curd 500 g,Dairy,193.0,4,134.84,22.0,0,STOCK SUFFICIENT
+P009,Coffee 100 g,Beverages,137.0,6,85.45,9.0,0,STOCK SUFFICIENT
+P005,Cooking Oil 1 L,Oil & Ghee,272.0,5,212.0,24.0,0,STOCK SUFFICIENT
+P028,Dry Fruits 200 g,Snacks,69.0,5,50.26,6.0,0,STOCK SUFFICIENT
+P001,Rice 5 kg,Staples,563.0,7,285.39,30.0,0,STOCK SUFFICIENT
+P002,Wheat Flour 5 kg,Staples,520.0,7,268.14,25.0,0,STOCK SUFFICIENT
+P003,Toor Dal 1 kg,Pulses,297.0,6,191.57,20.0,0,STOCK SUFFICIENT
+P019,Bath Soap,Personal Care,584.0,7,307.08,32.0,0,STOCK SUFFICIENT
+P029,Sanitary Pads Pack,Personal Care,50.0,2,35.37,11.0,0,STOCK SUFFICIENT
+P013,Bread Loaf,Bakery,143.0,3,105.4,25.0,0,STOCK SUFFICIENT
+P023,Dishwash Liquid,Household,209.0,6,136.34,14.0,0,STOCK SUFFICIENT
+P022,Laundry Detergent 1 kg,Household,166.0,5,144.75,17.0,0,STOCK SUFFICIENT
+P026,Soft Drink 750 ml,Beverages,148.0,2,87.96,32.0,0,STOCK SUFFICIENT
+P014,Biscuits Pack,Snacks,659.0,5,359.34,48.0,0,STOCK SUFFICIENT
+P030,Baby Diapers Pack,Baby Care,101.0,6,56.27,5.0,0,STOCK SUFFICIENT

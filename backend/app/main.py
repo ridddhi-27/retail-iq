@@ -34,22 +34,21 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized (%s)", "SQLite" if settings.is_sqlite else "PostgreSQL")
 
-    # Load ML model artifacts
-    # Look for artifacts in the workspace root first, then model_dir
-    workspace_root = Path(__file__).resolve().parent.parent.parent  # retail-iq/
-    artifacts_dir = workspace_root  # The ML files are in the project root
-    model_dir = Path(settings.model_dir)
+    # Discover and load ML model artifacts
+    artifacts_dir = model_service.discover_artifacts_dir(
+        explicit_path=settings.model_path or settings.model_dir
+    )
 
-    if (model_dir / "retailiq_model.joblib").exists():
-        artifacts_dir = model_dir
-    elif (workspace_root / "retailiq_model.joblib").exists():
-        artifacts_dir = workspace_root
+    if artifacts_dir:
+        logger.info("Discovered ML model artifacts at: %s", artifacts_dir)
+        model_service.artifacts_dir = artifacts_dir
+        model_service.load_all()
     else:
-        logger.warning("Model artifacts not found in %s or %s", model_dir, workspace_root)
-
-    logger.info("Loading ML artifacts from: %s", artifacts_dir)
-    model_service.artifacts_dir = artifacts_dir
-    model_service.load_all()
+        logger.error(
+            "CRITICAL: retailiq_model.joblib not found in any candidate locations (model_dir=%s, cwd=%s)",
+            settings.model_dir, Path.cwd()
+        )
+        model_service.load_error = f"Model artifact retailiq_model.joblib not found in searched locations."
 
     status = model_service.get_status()
     logger.info("Model status: %s", status)

@@ -155,7 +155,7 @@ def health_check(db: Session = Depends(get_db)):
     except Exception:
         db_status = "disconnected"
 
-    model_status = "loaded" if model_service.model_loaded else "ready (precomputed mode)"
+    model_status = "loaded" if model_service.model_loaded else "unavailable"
 
     return HealthResponse(
         status="ok",
@@ -163,6 +163,9 @@ def health_check(db: Session = Depends(get_db)):
         version=settings.app_version,
         database=db_status,
         model=model_status,
+        model_loaded=model_service.model_loaded,
+        model_path=str(model_service.artifacts_dir) if model_service.artifacts_dir else None,
+        model_error=model_service.load_error,
         environment=settings.environment,
         timestamp=datetime.utcnow(),
     )

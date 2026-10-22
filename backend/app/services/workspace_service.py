@@ -97,18 +97,50 @@ def populate_sample_workspace(db: Session, workspace: Workspace) -> int:
     Populate a freshly created sample workspace with the prepared sample dataset,
     ensuring each sample user receives an isolated copy they can interact with.
     """
-    inv_path = Path(__file__).resolve().parent.parent.parent.parent / "inventory_recommendations.csv"
-    sample_csv = Path(__file__).resolve().parent.parent.parent.parent / "data" / "sample_retail_sales.csv"
+    # Search candidate paths for sample datasets
+    candidate_dirs = [
+        Path(__file__).resolve().parent.parent.parent.parent,       # retail-iq/
+        Path(__file__).resolve().parent.parent.parent,              # backend/
+        Path(__file__).resolve().parent.parent / "models",          # backend/app/models/
+        Path.cwd(),
+        Path.cwd() / "data",
+    ]
 
-    if not sample_csv.exists() or not inv_path.exists():
-        logger.warning("Sample dataset files missing at %s or %s", sample_csv, inv_path)
+    inv_path = None
+    for d in candidate_dirs:
+        for p in [d / "inventory_recommendations.csv", d / "app" / "models" / "inventory_recommendations.csv", d / "models" / "inventory_recommendations.csv"]:
+            if p.exists():
+                inv_path = p
+                break
+        if inv_path:
+            break
+
+    sample_csv = None
+    for d in candidate_dirs:
+        for p in [d / "data" / "sample_retail_sales.csv", d / "sample_retail_sales.csv"]:
+            if p.exists():
+                sample_csv = p
+                break
+        if sample_csv:
+            break
+
+    if not sample_csv or not inv_path:
+        logger.warning("Sample dataset files missing (sample_csv=%s, inv_path=%s)", sample_csv, inv_path)
         return 0
 
     # 1. Products from inventory_recommendations
     inv_df = pd.read_csv(inv_path)
-    forecast_path = Path(__file__).resolve().parent.parent.parent.parent / "forecast_30_days.csv"
+    forecast_path = None
+    for d in candidate_dirs:
+        for p in [d / "forecast_30_days.csv", d / "app" / "models" / "forecast_30_days.csv", d / "models" / "forecast_30_days.csv"]:
+            if p.exists():
+                forecast_path = p
+                break
+        if forecast_path:
+            break
+
     price_map = {}
-    if forecast_path.exists():
+    if forecast_path and forecast_path.exists():
         fdf = pd.read_csv(forecast_path)
         price_map = fdf.groupby("product_id")["assumed_unit_price"].first().to_dict()
 

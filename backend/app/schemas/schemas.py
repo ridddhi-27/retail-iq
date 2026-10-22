@@ -36,6 +36,9 @@ class HealthResponse(BaseModel):
     version: str = "1.0.0"
     database: str = "unknown"
     model: str = "unknown"
+    model_loaded: bool = False
+    model_path: Optional[str] = None
+    model_error: Optional[str] = None
     environment: str = "development"
     timestamp: datetime
 

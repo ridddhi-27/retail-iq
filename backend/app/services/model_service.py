@@ -1,5 +1,7 @@
 """ML Model service — loads Extra Trees pipeline and executes workspace-scoped recursive forecasts."""
 
+import os
+import sys
 import json
 import logging
 from pathlib import Path
@@ -13,15 +15,38 @@ from app.database.models import Product, SalesRecord, ForecastRun, ForecastResul
 
 logger = logging.getLogger(__name__)
 
+# ── Scikit-Learn cross-version compatibility shims ───────────────────────────
+try:
+    import sklearn.compose._column_transformer as _ct_mod
+    if not hasattr(_ct_mod, '_RemainderColsList'):
+        class _RemainderColsList(list):
+            __module__ = "sklearn.compose._column_transformer"
+        _ct_mod._RemainderColsList = _RemainderColsList
+except Exception as _shim_err:
+    logger.debug("ColumnTransformer shim note: %s", _shim_err)
+
+try:
+    import sklearn.impute as _imp_mod
+    if hasattr(_imp_mod, 'SimpleImputer') and not hasattr(_imp_mod.SimpleImputer, '_patched_shim'):
+        _orig_transform = _imp_mod.SimpleImputer.transform
+        def _compat_transform(self_imputer, X):
+            if not hasattr(self_imputer, '_fill_dtype'):
+                self_imputer._fill_dtype = getattr(self_imputer, '_fit_dtype', float)
+            return _orig_transform(self_imputer, X)
+        _imp_mod.SimpleImputer.transform = _compat_transform
+        _imp_mod.SimpleImputer._patched_shim = True
+except Exception as _shim_err:
+    logger.debug("SimpleImputer shim note: %s", _shim_err)
+
 
 class ModelService:
     """
-    Loads the Colab-exported Extra Trees model pipeline (~358MB)
+    Loads the Colab-exported Extra Trees model pipeline (~76MB compressed)
     and executes recursive multi-day demand forecasting scoped by workspace.
     """
 
-    def __init__(self, artifacts_dir: str = "."):
-        self.artifacts_dir = Path(artifacts_dir)
+    def __init__(self, artifacts_dir: Optional[str] = None):
+        self.artifacts_dir: Optional[Path] = Path(artifacts_dir) if artifacts_dir else None
         self.model = None
         self.feature_columns: List[str] = []
         self.metrics: Dict[str, Any] = {}
@@ -32,8 +57,69 @@ class ModelService:
         self.forecast_loaded = False
         self.load_error: Optional[str] = None
 
+    @staticmethod
+    def discover_artifacts_dir(explicit_path: Optional[str] = None) -> Optional[Path]:
+        """
+        Robustly locate the directory containing retailiq_model.joblib.
+        Checks explicit configuration, environment variables, standard application paths,
+        and repository root.
+        """
+        candidates: List[Path] = []
+
+        # 1. Explicit path passed as argument
+        if explicit_path:
+            p = Path(explicit_path)
+            candidates.append(p.parent if p.is_file() else p)
+            candidates.append(Path.cwd() / p)
+
+        # 2. Environment variables
+        env_path = os.environ.get("MODEL_PATH")
+        if env_path:
+            p = Path(env_path)
+            candidates.append(p.parent if p.is_file() else p)
+
+        env_dir = os.environ.get("MODEL_DIR")
+        if env_dir:
+            p = Path(env_dir)
+            candidates.append(p)
+            candidates.append(Path.cwd() / p)
+
+        # 3. Code-relative canonical paths
+        this_file = Path(__file__).resolve()
+        services_dir = this_file.parent                    # backend/app/services
+        app_dir = services_dir.parent                      # backend/app
+        backend_dir = app_dir.parent                       # backend
+        repo_root = backend_dir.parent                     # retail-iq
+
+        candidates.extend([
+            app_dir / "models",                            # backend/app/models
+            backend_dir / "app" / "models",                # backend/app/models
+            repo_root / "backend" / "app" / "models",      # repo_root/backend/app/models
+            repo_root,                                     # repo_root
+            Path.cwd() / "app" / "models",
+            Path.cwd() / "backend" / "app" / "models",
+            Path.cwd(),
+        ])
+
+        for c in candidates:
+            try:
+                resolved = c.resolve()
+                if (resolved / "retailiq_model.joblib").exists():
+                    return resolved
+            except Exception:
+                continue
+
+        return None
+
     def load_all(self) -> None:
         """Load all available model artifacts safely."""
+        if not self.artifacts_dir or not (self.artifacts_dir / "retailiq_model.joblib").exists():
+            discovered = self.discover_artifacts_dir()
+            if discovered:
+                self.artifacts_dir = discovered
+            elif not self.artifacts_dir:
+                self.artifacts_dir = Path.cwd()
+
         self.artifacts_dir = Path(self.artifacts_dir)
         self._load_feature_columns()
         self._load_metrics()
@@ -45,71 +131,73 @@ class ModelService:
     def _load_feature_columns(self) -> None:
         path = self.artifacts_dir / "feature_columns.json"
         if path.exists():
-            with open(path) as f:
-                self.feature_columns = json.load(f)
-            logger.info("Loaded feature_columns.json: %d columns", len(self.feature_columns))
+            try:
+                with open(path) as f:
+                    self.feature_columns = json.load(f)
+                logger.info("Loaded feature_columns.json: %d columns", len(self.feature_columns))
+            except Exception as e:
+                logger.warning("Error reading feature_columns.json: %s", e)
 
     def _load_metrics(self) -> None:
         path = self.artifacts_dir / "metrics.json"
         if path.exists():
-            with open(path) as f:
-                self.metrics = json.load(f)
+            try:
+                with open(path) as f:
+                    self.metrics = json.load(f)
+            except Exception as e:
+                logger.warning("Error reading metrics.json: %s", e)
 
     def _load_model_comparison(self) -> None:
         path = self.artifacts_dir / "model_comparison.csv"
         if path.exists():
-            df = pd.read_csv(path)
-            self.model_comparison = df.to_dict(orient="records")
+            try:
+                df = pd.read_csv(path)
+                self.model_comparison = df.to_dict(orient="records")
+            except Exception as e:
+                logger.warning("Error reading model_comparison.csv: %s", e)
 
     def _load_forecasts(self) -> None:
         path = self.artifacts_dir / "forecast_30_days.csv"
         if path.exists():
-            self.forecast_df = pd.read_csv(path, parse_dates=["date"])
-            self.forecast_loaded = True
-            logger.info("Loaded forecast_30_days.csv: %d rows", len(self.forecast_df))
+            try:
+                self.forecast_df = pd.read_csv(path, parse_dates=["date"])
+                self.forecast_loaded = True
+                logger.info("Loaded forecast_30_days.csv: %d rows", len(self.forecast_df))
+            except Exception as e:
+                logger.warning("Error reading forecast_30_days.csv: %s", e)
 
     def _load_inventory(self) -> None:
         path = self.artifacts_dir / "inventory_recommendations.csv"
         if path.exists():
-            self.inventory_df = pd.read_csv(path)
+            try:
+                self.inventory_df = pd.read_csv(path)
+            except Exception as e:
+                logger.warning("Error reading inventory_recommendations.csv: %s", e)
 
     def _load_model(self) -> None:
         path = self.artifacts_dir / "retailiq_model.joblib"
         if not path.exists():
-            self.load_error = f"Model artifact not found at {path}"
+            self.model_loaded = False
+            self.load_error = f"Model artifact retailiq_model.joblib not found at {path}"
+            logger.error(self.load_error)
             return
 
         try:
-            # Compatibility shims for Scikit-Learn cross-version unpickling
-            import sklearn.compose._column_transformer
-            if not hasattr(sklearn.compose._column_transformer, '_RemainderColsList'):
-                class _RemainderColsList(list):
-                    pass
-                sklearn.compose._column_transformer._RemainderColsList = _RemainderColsList
-
-            import sklearn.impute
-            if hasattr(sklearn.impute, 'SimpleImputer') and not hasattr(sklearn.impute.SimpleImputer, '_patched_shim'):
-                orig_transform = sklearn.impute.SimpleImputer.transform
-                def _compat_transform(self_imputer, X):
-                    if not hasattr(self_imputer, '_fill_dtype'):
-                        self_imputer._fill_dtype = getattr(self_imputer, '_fit_dtype', float)
-                    return orig_transform(self_imputer, X)
-                sklearn.impute.SimpleImputer.transform = _compat_transform
-                sklearn.impute.SimpleImputer._patched_shim = True
-
             import joblib
             self.model = joblib.load(path)
             self.model_loaded = True
             self.load_error = None
-            logger.info("Loaded retailiq_model.joblib successfully (%s)", type(self.model).__name__)
+            logger.info("Loaded retailiq_model.joblib successfully from %s (%s)", path, type(self.model).__name__)
         except Exception as e:
-            self.load_error = f"Failed to load model: {e}"
-            logger.error(self.load_error)
+            self.model_loaded = False
+            self.load_error = f"Failed to load model from {path}: {e}"
+            logger.error(self.load_error, exc_info=True)
 
     def get_status(self) -> Dict[str, Any]:
         return {
             "model_loaded": self.model_loaded,
             "model_type": type(self.model).__name__ if self.model else None,
+            "artifacts_dir": str(self.artifacts_dir) if self.artifacts_dir else None,
             "forecast_loaded": self.forecast_loaded,
             "forecast_rows": len(self.forecast_df) if self.forecast_df is not None else 0,
             "feature_columns": len(self.feature_columns),
@@ -132,14 +220,18 @@ class ModelService:
     ) -> Dict[str, Any]:
         """
         Generate demand forecasts for requested products strictly within the active workspace.
-        Uses recursive feature generation and the trained Extra Trees model, or precomputed
-        baseline forecasts when in sample workspace.
+        Prioritizes live inference using the loaded Extra Trees model pipeline.
+        Only falls back to precomputed static forecasts when the live model is genuinely unavailable.
         """
         ws = db.query(Workspace).filter(Workspace.workspace_id == workspace_id).first()
         is_sample = ws.is_sample if ws else False
 
-        # If sample workspace and pre-computed forecast is available
-        if is_sample and self.forecast_df is not None:
+        # If live model is NOT loaded and pre-computed forecast is available for sample workspace
+        if not self.model_loaded and is_sample and self.forecast_df is not None:
+            logger.warning(
+                "Live model is unavailable (%s). Using static precomputed forecasts for sample workspace.",
+                self.load_error or "not loaded"
+            )
             df = self.forecast_df.copy()
             df = df[df["product_id"].isin(product_ids)]
             if horizon_days < 30:
@@ -148,7 +240,7 @@ class ModelService:
             # Store run in db scoped to workspace
             run = ForecastRun(
                 workspace_id=workspace_id,
-                model_name=self.metrics.get("best_model", "Extra Trees Regressor"),
+                model_name="Precomputed Baseline (Model Unavailable)",
                 horizon_days=horizon_days,
                 products_count=len(product_ids),
                 status="completed",
@@ -189,7 +281,6 @@ class ModelService:
 
             total_units = sum(f["predicted_units_sold"] for f in forecast_results)
             avg_daily = total_units / max(1, horizon_days)
-            # Find peak day
             day_totals = {}
             for f in forecast_results:
                 day_totals[f["forecast_date"]] = day_totals.get(f["forecast_date"], 0) + f["predicted_units_sold"]
@@ -207,7 +298,7 @@ class ModelService:
                 "status": "completed",
             }
 
-        # Custom workspace: query historical sales from DB
+        # Live inference execution path
         products = db.query(Product).filter(
             Product.workspace_id == workspace_id,
             Product.product_id.in_(product_ids)
@@ -233,9 +324,10 @@ class ModelService:
             "unit_price": float(r.unit_price or 50.0),
         } for r in sales_records])
 
+        model_label = "Extra Trees Regressor" if self.model_loaded else "Adaptive Baseline (Model Unavailable)"
         run = ForecastRun(
             workspace_id=workspace_id,
-            model_name="Extra Trees Regressor" if self.model_loaded else "Adaptive Baseline",
+            model_name=model_label,
             horizon_days=horizon_days,
             products_count=len(product_ids),
             status="completed",
@@ -270,7 +362,7 @@ class ModelService:
                 rolling_28 = sum(hist_units[-28:]) / min(len(hist_units), 28)
 
                 pred_val = recent_avg
-                # If model is loaded, execute live inference
+                # Live inference with the Extra Trees pipeline
                 if self.model_loaded and self.model is not None:
                     row_data = pd.DataFrame([{
                         "product_id": pid,
@@ -292,10 +384,11 @@ class ModelService:
                         p_pred = self.model.predict(row_data)
                         pred_val = max(0.0, float(p_pred[0]))
                     except Exception as inf_err:
-                        # Adaptive time-series fallback
+                        logger.error("Live model prediction failed for %s on %s: %s", pid, cur_date, inf_err)
                         dow_mult = 1.3 if cur_date.weekday() >= 5 else 0.95
                         pred_val = max(1.0, round(rolling_7 * dow_mult, 1))
                 else:
+                    logger.warning("Live model unavailable during forecast. Using adaptive time-series fallback.")
                     dow_mult = 1.3 if cur_date.weekday() >= 5 else 0.95
                     pred_val = max(1.0, round(rolling_7 * dow_mult, 1))
 

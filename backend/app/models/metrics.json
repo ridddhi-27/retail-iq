@@ -1,0 +1,13 @@
+{
+  "best_model": "Extra Trees",
+  "target": "safety_stock_units",
+  "train_start": "2020-01-29",
+  "train_end": "2024-12-31",
+  "test_start": "2025-01-01",
+  "test_end": "2025-12-31",
+  "MAE": 9.416856891363453,
+  "RMSE": 13.385053736008267,
+  "R2": 0.6793017758811815,
+  "data_source": "DB Mart-inspired synthetic dataset; not actual store records",
+  "forecast_horizon_days": 30
+}

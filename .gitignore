@@ -34,6 +34,5 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Large ML binary models and large test datasets
-*.joblib
+# Large test datasets (keep models and sample presets tracked)
 retailiq_sample_large.csv

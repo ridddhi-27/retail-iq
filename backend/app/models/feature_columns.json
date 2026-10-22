@@ -1,0 +1,16 @@
+[
+  "product_id",
+  "category",
+  "unit_price",
+  "discount_pct",
+  "promotion_flag",
+  "dayofweek",
+  "month",
+  "dayofyear",
+  "is_weekend",
+  "lag_1",
+  "lag_7",
+  "lag_28",
+  "rolling_mean_7",
+  "rolling_mean_28"
+]

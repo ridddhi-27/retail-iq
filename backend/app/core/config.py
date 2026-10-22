@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     # ML Model
     model_dir: str = "app/models"
+    model_path: Optional[str] = None
 
     # Upload
     max_upload_size_mb: int = 50
