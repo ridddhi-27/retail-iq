@@ -1,0 +1,218 @@
+@import "tailwindcss";
+
+/* ========================================================
+   RETAILIQ ADAPTIVE DESIGN TOKENS
+   Light Mode (Default) & Sophisticated Dark Mode
+======================================================== */
+
+:root,
+[data-theme="light"] {
+  --background: #F6F8FC;
+  --surface: #FFFFFF;
+  --surface-header: #FFFFFF;
+  --surface-sidebar: #FFFFFF;
+  --surface-secondary: #F1F4FB;
+  --surface-elevated: #FFFFFF;
+
+  --primary: #7778E8;
+  --primary-hover: #6667D7;
+  --secondary: #7BCFE0;
+
+  --accent-lavender: #E8E5FF;
+  --accent-lavender-text: #3B2E7E;
+  --accent-mint: #DDF5E9;
+  --accent-mint-text: #135A3D;
+  --accent-blue: #E0EDFF;
+  --accent-blue-text: #174276;
+  --accent-cyan: #7BCFE0;
+  --accent-cyan-text: #0E4B56;
+
+  --text-primary: #252B42;
+  --text-secondary: #667085;
+  --text-muted: #8993A7;
+  --border: #E5E9F2;
+  --border-subtle: #F0F2F7;
+
+  --success: #23966D;
+  --warning: #C88A26;
+  --danger: #D95365;
+
+  --card-shadow: 0 4px 20px -2px rgba(119, 120, 232, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+  --card-shadow-hover: 0 10px 25px -4px rgba(119, 120, 232, 0.16), 0 4px 10px -2px rgba(0, 0, 0, 0.04);
+
+  --chart-grid: #E5E9F2;
+  --chart-tooltip-bg: #FFFFFF;
+  --chart-tooltip-border: #E5E9F2;
+  --chart-tooltip-text: #252B42;
+}
+
+.dark,
+[data-theme="dark"] {
+  --background: #0B1020;
+  --surface: #151E33;
+  --surface-header: #11182B;
+  --surface-sidebar: #101729;
+  --surface-secondary: #19243B;
+  --surface-elevated: #202D46;
+
+  --primary: #A49BFF;
+  --primary-hover: #9288F8;
+  --secondary: #72D7F0;
+
+  --accent-lavender: #26274D;
+  --accent-lavender-text: #C4BFFF;
+  --accent-mint: #153B2F;
+  --accent-mint-text: #7FE0B5;
+  --accent-blue: #182C4E;
+  --accent-blue-text: #96C4FF;
+  --accent-cyan: #133946;
+  --accent-cyan-text: #72D7F0;
+
+  --text-primary: #F4F6FF;
+  --text-secondary: #A5B0C8;
+  --text-muted: #7885A0;
+  --border: #293650;
+  --border-subtle: #1E283E;
+
+  --success: #49D6A0;
+  --warning: #F2BB67;
+  --danger: #FF8495;
+
+  --card-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45);
+  --card-shadow-hover: 0 10px 25px -4px rgba(0, 0, 0, 0.65);
+
+  --chart-grid: #293650;
+  --chart-tooltip-bg: #151E33;
+  --chart-tooltip-border: #293650;
+  --chart-tooltip-text: #F4F6FF;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+
+  /* Visible accessibility focus rings */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+}
+
+/* ========================================================
+   Theme Surface & Typography Utility Classes
+======================================================== */
+.theme-bg {
+  background-color: var(--background);
+}
+.theme-surface {
+  background-color: var(--surface);
+}
+.theme-surface-secondary {
+  background-color: var(--surface-secondary);
+}
+.theme-surface-header {
+  background-color: var(--surface-header);
+}
+.theme-surface-sidebar {
+  background-color: var(--surface-sidebar);
+}
+.theme-surface-elevated {
+  background-color: var(--surface-elevated);
+}
+
+.theme-border {
+  border-color: var(--border);
+}
+.theme-text-primary {
+  color: var(--text-primary);
+}
+.theme-text-secondary {
+  color: var(--text-secondary);
+}
+.theme-text-muted {
+  color: var(--text-muted);
+}
+
+/* Standard Pastel Card System */
+.pastel-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: var(--card-shadow);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pastel-card-hover:hover {
+  box-shadow: var(--card-shadow-hover);
+  border-color: var(--primary);
+}
+
+/* Adaptive Status Badges */
+.pastel-badge-lavender {
+  background-color: var(--accent-lavender);
+  color: var(--accent-lavender-text);
+}
+
+.pastel-badge-mint {
+  background-color: var(--accent-mint);
+  color: var(--accent-mint-text);
+}
+
+.pastel-badge-blue {
+  background-color: var(--accent-blue);
+  color: var(--accent-blue-text);
+}
+
+.pastel-badge-cyan {
+  background-color: var(--accent-cyan);
+  color: var(--accent-cyan-text);
+}
+
+.pastel-badge-warning {
+  background-color: #FEF3D6;
+  color: #7D4D04;
+}
+.dark .pastel-badge-warning,
+[data-theme="dark"] .pastel-badge-warning {
+  background-color: #3D2C12;
+  color: #F2BB67;
+}
+
+.pastel-badge-danger {
+  background-color: #FDE8EC;
+  color: #8C1D2C;
+}
+.dark .pastel-badge-danger,
+[data-theme="dark"] .pastel-badge-danger {
+  background-color: #3D141C;
+  color: #FF8495;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
